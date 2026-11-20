@@ -94,19 +94,19 @@ editor.addEventListener('compositionend', () => { composing = false; schedule();
 editor.addEventListener('keydown', event => {
   if (event.isComposing || composing || event.altKey) return;
   const {selectionStart:from, selectionEnd:to, value} = editor;
-  let edit;
+  let command;
   if (event.key === 'Enter' && !event.shiftKey) {
-    if (event.ctrlKey || event.metaKey) edit = editLines(value, from, to, 'task');
-    else if (from === to) edit = continueList(value, from);
+    if (event.ctrlKey || event.metaKey) command = editLines(value, from, to, 'task');
+    else if (from === to) command = continueList(value, from);
   } else if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && (from !== to || /^\s*(?:[-+*]|\d+[.)]) /.test(value.slice(value.lastIndexOf('\n',from-1)+1,from)))) {
-    edit = editLines(value, from, to, event.shiftKey ? 'outdent' : 'indent');
+    command = editLines(value, from, to, event.shiftKey ? 'outdent' : 'indent');
   }
-  if (!edit) return;
+  if (!command) return;
   event.preventDefault();
-  editor.setSelectionRange(edit.from, edit.to);
-  const applied = edit.replacement ? document.execCommand('insertText',false,edit.replacement) : document.execCommand('delete');
-  if (!applied) editor.setRangeText(edit.replacement, edit.from, edit.to, 'end');
-  editor.setSelectionRange(edit.start, edit.end);
+  editor.setSelectionRange(command.from, command.to);
+  const applied = command.replacement ? document.execCommand('insertText',false,command.replacement) : document.execCommand('delete');
+  if (!applied) editor.setRangeText(command.replacement, command.from, command.to, 'end');
+  editor.setSelectionRange(command.start, command.end);
   edit();
 });
 const viewLabels = { source:'Markdown 源码', split:'分栏', preview:'预览' };

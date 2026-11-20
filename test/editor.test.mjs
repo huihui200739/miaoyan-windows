@@ -1,6 +1,7 @@
+import { marked } from 'marked';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { continueList, editLines, sourceLineRange, toggleTaskAtSourceLine, sourceHighlight } from '../lib/index.mjs';
+import { continueList, editLines, sourceLineRange, toggleTaskAtSourceLine, sourceHighlight, localImageReference } from '../lib/index.mjs';
 const apply = (text, edit) => text.slice(0, edit.from) + edit.replacement + text.slice(edit.to);
 
 test('ports MiaoYan Return behavior for numbered and nested quoted tasks', () => {
@@ -25,4 +26,19 @@ test('highlighter distinguishes Setext headings, references and code without emi
   assert.match(output, /md-syntax-link">\[ref\]/);
   assert.match(output, /md-syntax-code"># in code &lt;img&gt;/);
   assert.doesNotMatch(output, /<img>/);
+});
+
+
+test('loose tasks render the box inside the first paragraph without moving nested tasks', () => {
+  const html = marked.parse('- [x] done\n  - [ ] child\n\n- [ ] todo');
+  assert.match(html, /<li><p><input [^>]*checked[^>]*> done<\/p>/);
+  assert.match(html, /<li><input [^>]*> child<\/li>/);
+  assert.match(html, /<li><p><input [^>]*> todo<\/p>/);
+});
+
+test('local images accept portable raster paths and reject external or parent paths', () => {
+  assert.deepEqual(localImageReference('./assets/你好%20世界.PNG'), { parts:['assets','你好 世界.PNG'],type:'image/png' });
+  for (const url of ['../a.png', 'x/%2e%2e/a.png', '%5c%5chost/a.png','C:/a.png','https://host/a.png','a.svg','a.png:stream','a.png?x','a%00.png','a//b.png','%ff.jpg']) {
+    assert.equal(localImageReference(url), null, url);
+  }
 });

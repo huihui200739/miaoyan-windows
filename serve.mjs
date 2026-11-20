@@ -5,7 +5,7 @@ const files = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/editor.css', ['editor.css','text/css']], ['/editor.mjs', ['editor.mjs','text/javascript']],
   ['/lib/layout.css',['lib/layout.css','text/css']],
-  ...['index','editing','highlight','layout'].map(name => ['/lib/'+name+'.mjs',['lib/'+name+'.mjs','text/javascript']]),
+  ...['index','editing','highlight','layout','preview'].map(name => ['/lib/'+name+'.mjs',['lib/'+name+'.mjs','text/javascript']]),
   ['/marked.mjs', ['node_modules/marked/lib/marked.esm.js','text/javascript']],
   ['/purify.mjs', ['node_modules/dompurify/dist/purify.es.mjs','text/javascript']]
 ]);
