@@ -1,0 +1,17 @@
+{
+  "name": "miaoyan-windows",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows port of MiaoYan Markdown editor behaviors",
+  "type": "module",
+  "license": "MIT",
+  "exports": "./lib/index.mjs",
+  "scripts": {
+    "test": "node --test",
+    "start": "node serve.mjs"
+  },
+  "dependencies": {
+    "marked": "18.1.2",
+    "dompurify": "3.4.17"
+  }
+}

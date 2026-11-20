@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>妙言 Markdown · Windows</title><link rel="stylesheet" href="/editor.css"></head>
+<body data-view="split">
+  <header><strong>妙言 Markdown</strong><label class="button">打开文件<input id="file" type="file" accept=".md,.markdown,text/markdown"></label><button id="save" type="button">保存文件</button><nav aria-label="视图"><button data-view="source">源码</button><button data-view="split" aria-pressed="true">分栏</button><button data-view="preview">预览</button></nav><output id="filename"></output></header>
+  <main><section class="source"><div id="mirror" aria-hidden="true"></div><textarea id="editor" spellcheck="false" aria-label="Markdown 源码"></textarea></section><article id="preview" aria-label="Markdown 预览"></article></main>
+  <script src="/editor.mjs" type="module"></script>
+</body></html>

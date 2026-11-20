@@ -1,0 +1,19 @@
+:root { color-scheme: light dark; font: 15px/1.6 "Microsoft YaHei UI", system-ui; background: Canvas; color: CanvasText; }
+* { box-sizing: border-box; }
+body { margin: 0; height: 100dvh; display: grid; grid-template-rows: auto 1fr; }
+header { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 12px 18px; border-bottom: 1px solid GrayText; }
+header strong { margin-right: 12px; } nav { display: flex; gap: 4px; }
+button, .button { font: inherit; color: inherit; background: Canvas; border: 1px solid GrayText; border-radius: 5px; padding: 4px 10px; cursor: pointer; }
+.button { position: relative; } .button input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+button[aria-pressed="true"] { background: Highlight; color: HighlightText; border-color: Highlight; }
+main { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); min-height: 0; }
+.source { position: relative; min-height: 0; } #preview { overflow: auto; padding: 22px 30px; overflow-wrap: anywhere; border-left: 1px solid GrayText; }
+#mirror, #editor { position: absolute; inset: 0; width: 100%; height: 100%; padding: 24px; margin: 0; border: 0; font: 16px/1.65 Consolas,"Microsoft YaHei UI",monospace; tab-size: 4; overflow: auto; overflow-wrap: break-word; white-space: pre-wrap; }
+#mirror { pointer-events: none; scrollbar-color: transparent transparent; }
+#editor { resize: none; outline-offset: -2px; background: Canvas; color: CanvasText; }
+.md-source-ready #editor { background: transparent; color: transparent; caret-color: CanvasText; }
+.md-source-composing #editor { background: Canvas; color: CanvasText; }
+.md-syntax-heading,.md-syntax-link { color: LinkText; } .md-syntax-marker,.md-syntax-quote { color: GrayText; } .md-syntax-code,.md-syntax-emphasis { color: color-mix(in srgb, CanvasText, LinkText 55%); }
+[data-view="source"] main,[data-view="preview"] main { grid-template-columns: 1fr; }
+[data-view="source"] #preview,[data-view="preview"] .source { display: none; }
+pre { overflow: auto; padding: 12px; background: Field; } blockquote { margin-left: 0; border-left: 3px solid GrayText; padding-left: 16px; }

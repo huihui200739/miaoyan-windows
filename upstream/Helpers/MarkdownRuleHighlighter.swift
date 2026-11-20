@@ -1,0 +1,465 @@
+import Cocoa
+
+@MainActor
+enum MarkdownRuleHighlighter {
+    static func highlightBasicMarkdown(attributedString: NSMutableAttributedString, range: NSRange? = nil, note: Note) {
+        let range = range ?? NSRange(0..<attributedString.length)
+        let string = attributedString.string
+
+        guard range.upperBound <= attributedString.length else { return }
+
+        attributedString.removeAttribute(.codeBlock, range: range)
+        attributedString.removeAttribute(.codeLanguage, range: range)
+        attributedString.addAttribute(.font, value: NotesTextProcessor.font, range: range)
+        attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.fontColor, range: range)
+
+        NotesTextProcessor.headersAtxRegex.matches(string, range: range) { result in
+            guard let range = result?.range, range.upperBound <= attributedString.length else { return }
+            attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.titleColor, range: range)
+        }
+
+        NotesTextProcessor.listRegex.matches(string, range: range) { result in
+            guard let range = result?.range, range.upperBound <= attributedString.length else { return }
+            NotesTextProcessor.listOpeningRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range, innerRange.upperBound <= attributedString.length else { return }
+                attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.listColor, range: innerRange)
+            }
+        }
+
+        NotesTextProcessor.blockQuoteRegex.matches(string, range: range) { result in
+            guard let range = result?.range, range.upperBound <= attributedString.length else { return }
+            attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.listColor, range: range)
+        }
+
+        if let regex = NotesTextProcessor.getCodeBlockRegex() {
+            regex.enumerateMatches(in: string, options: [], range: range) { result, _, _ in
+                guard let codeRange = result?.range, codeRange.upperBound <= attributedString.length else { return }
+
+                let codeColor = NotesTextProcessor.codeBlockPlainColor
+
+                if let codeFont = NotesTextProcessor.codeFont {
+                    attributedString.addAttribute(.font, value: codeFont, range: codeRange)
+                }
+                attributedString.addAttribute(.foregroundColor, value: codeColor, range: codeRange)
+                attributedString.addAttribute(.codeBlock, value: true, range: codeRange)
+                attributedString.removeAttribute(.codeLanguage, range: codeRange)
+            }
+        }
+
+        NotesTextProcessor.imageRegex.matches(string, range: range) { result in
+            guard let range = result?.range, range.upperBound <= attributedString.length else { return }
+            attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.linkColor, range: range)
+        }
+
+        attributedString.fixAttributes(in: range)
+    }
+
+    /// `range` of `string` with inline code filled with backticks, so a `*`,
+    /// `_` or `~` in code cannot pair up as markup; `offset` is where the
+    /// text starts in `string`. Without inline code it is `string` itself.
+    private static func textWithCodeSpansMasked(_ string: String, range: NSRange) -> (text: String, offset: Int) {
+        var spans: [NSRange] = []
+        NotesTextProcessor.codeSpanRegex.regularExpression.enumerateMatches(in: string, options: [], range: range) { result, _, _ in
+            if let result { spans.append(result.range) }
+        }
+        guard !spans.isEmpty else { return (string, 0) }
+
+        var units = [unichar](repeating: 0, count: range.length)
+        (string as NSString).getCharacters(&units, range: range)
+        let backtick: unichar = 0x60
+        for span in spans {
+            for index in (span.location - range.location)..<(span.upperBound - range.location)
+            where units[index] != 0x0A && units[index] != 0x0D {
+                units[index] = backtick
+            }
+        }
+        return (String(utf16CodeUnits: units, count: units.count), range.location)
+    }
+
+    // swiftlint:disable:next cyclomatic_complexity
+    static func highlightMarkdown(attributedString: NSMutableAttributedString, paragraphRange: NSRange? = nil, note: Note) {
+        let paragraphRange = paragraphRange ?? NSRange(0..<attributedString.length)
+        let isFullScan = attributedString.length == paragraphRange.upperBound && paragraphRange.lowerBound == 0
+        let string = attributedString.string
+
+        let quoteFont = NotesTextProcessor.quoteFont(CGFloat(UserDefaultsManagement.fontSize))
+        let hiddenFont = NSFont.systemFont(ofSize: 0.1)
+        let hiddenColor = NSColor.clear
+        let hiddenAttributes: [NSAttributedString.Key: Any] = [
+            .font: hiddenFont,
+            .foregroundColor: hiddenColor,
+        ]
+
+        func hideSyntaxIfNecessary(range: @autoclosure () -> NSRange) {
+            guard NotesTextProcessor.hideSyntax else { return }
+            attributedString.addAttributes(hiddenAttributes, range: range())
+        }
+
+        // Markdown's own punctuation (`#`, `**`, `>`, `-`, brackets) in the
+        // quiet markup colour and the system face a size down: TsangerJinKai
+        // draws `<`, `>`, `*` and `"` wide and heavy, and they stood out
+        // against the text they wrap.
+        let markupAttributes: [NSAttributedString.Key: Any] = [
+            .font: NotesTextProcessor.markupFont,
+            .foregroundColor: NotesTextProcessor.syntaxColor,
+        ]
+        func markSyntax(_ range: NSRange) {
+            guard range.length > 0, range.upperBound <= attributedString.length else { return }
+            attributedString.addAttributes(markupAttributes, range: range)
+        }
+        /// The same `length` characters at both ends of a delimited span.
+        func markDelimiters(of range: NSRange, length: Int) {
+            guard length > 0, range.length >= length * 2 else { return }
+            markSyntax(NSRange(location: range.location, length: length))
+            markSyntax(NSRange(location: range.upperBound - length, length: length))
+        }
+
+        attributedString.enumerateAttribute(.link, in: paragraphRange) { value, range, _ in
+            guard value != nil,
+                range.upperBound <= attributedString.length,
+                attributedString.attribute(.attachment, at: range.location, effectiveRange: nil) == nil
+            else {
+                return
+            }
+            attributedString.removeAttribute(.link, range: range)
+        }
+
+        attributedString.enumerateAttribute(.strikethroughStyle, in: paragraphRange) { value, range, _ in
+            guard value != nil, range.upperBound <= attributedString.length else {
+                return
+            }
+            attributedString.removeAttribute(.strikethroughStyle, range: range)
+        }
+
+        attributedString.addAttribute(.font, value: NotesTextProcessor.font, range: paragraphRange)
+        attributedString.fixAttributes(in: paragraphRange)
+
+        attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.fontColor, range: paragraphRange)
+        attributedString.enumerateAttribute(.foregroundColor, in: paragraphRange) { value, range, _ in
+            guard value is NSColor,
+                range.upperBound <= attributedString.length
+            else {
+                return
+            }
+            attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.fontColor, range: range)
+        }
+
+        let emphasis = textWithCodeSpansMasked(string, range: paragraphRange)
+        let emphasisRange = NSRange(location: paragraphRange.location - emphasis.offset, length: paragraphRange.length)
+        func emphasisMatches(_ regex: MarklightRegex, _ body: @escaping (_ range: NSRange, _ delimiterLength: Int) -> Void) {
+            regex.matches(emphasis.text, range: emphasisRange) { result in
+                guard let result else { return }
+                let range = NSRange(location: result.range.location + emphasis.offset, length: result.range.length)
+                guard range.upperBound <= attributedString.length else { return }
+                body(range, result.range(at: 1).length)
+            }
+        }
+
+        emphasisMatches(NotesTextProcessor.italicRegex) { range, delimiterLength in
+            attributedString.fixAttributes(in: range)
+            attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.titleColor, range: range)
+            markDelimiters(of: range, length: delimiterLength)
+        }
+
+        emphasisMatches(NotesTextProcessor.boldRegex) { range, delimiterLength in
+            attributedString.fixAttributes(in: range)
+            attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.htmlColor, range: range)
+            markDelimiters(of: range, length: delimiterLength)
+        }
+
+        emphasisMatches(NotesTextProcessor.strikeRegex) { range, delimiterLength in
+            attributedString.fixAttributes(in: range)
+            attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.htmlColor, range: range)
+            markDelimiters(of: range, length: delimiterLength)
+        }
+
+        NotesTextProcessor.codeLineRegex.matches(string, range: paragraphRange) { result in
+            guard let range = result?.range,
+                range.upperBound <= attributedString.length
+            else {
+                return
+            }
+            attributedString.fixAttributes(in: range)
+            attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.htmlColor, range: range)
+            markDelimiters(of: range, length: result?.range(at: 1).length ?? 0)
+        }
+
+        NotesTextProcessor.headersSetextRegex.matches(string, range: paragraphRange) { result in
+            guard let range = result?.range,
+                range.upperBound <= attributedString.length
+            else {
+                return
+            }
+            attributedString.fixAttributes(in: range)
+
+            NotesTextProcessor.headersSetextUnderlineRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range,
+                    innerRange.upperBound <= attributedString.length
+                else {
+                    return
+                }
+                markSyntax(innerRange)
+                hideSyntaxIfNecessary(range: NSRange(location: innerRange.location, length: innerRange.length))
+            }
+        }
+
+        NotesTextProcessor.headersAtxRegex.matches(string, range: paragraphRange) { result in
+            guard let range = result?.range,
+                range.upperBound <= attributedString.length
+            else {
+                return
+            }
+            attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.titleColor, range: range)
+            attributedString.fixAttributes(in: range)
+
+            NotesTextProcessor.headersAtxOpeningRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range,
+                    innerRange.upperBound <= attributedString.length
+                else {
+                    return
+                }
+                markSyntax(innerRange)
+                let syntaxRange = NSRange(location: innerRange.location, length: innerRange.length + 1)
+                guard syntaxRange.upperBound <= attributedString.length else { return }
+                hideSyntaxIfNecessary(range: syntaxRange)
+            }
+
+            NotesTextProcessor.headersAtxClosingRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range,
+                    innerRange.upperBound <= attributedString.length
+                else {
+                    return
+                }
+                markSyntax(innerRange)
+                hideSyntaxIfNecessary(range: innerRange)
+            }
+        }
+
+        NotesTextProcessor.referenceLinkRegex.matches(string, range: paragraphRange) { result in
+            guard let range = result?.range,
+                range.upperBound <= attributedString.length
+            else {
+                return
+            }
+            attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.syntaxColor, range: range)
+        }
+
+        NotesTextProcessor.listRegex.matches(string, range: paragraphRange) { result in
+            guard let range = result?.range,
+                range.upperBound <= attributedString.length
+            else {
+                return
+            }
+
+            NotesTextProcessor.listOpeningRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range,
+                    innerRange.upperBound <= attributedString.length
+                else {
+                    return
+                }
+                markSyntax(innerRange)
+            }
+        }
+
+        NotesTextProcessor.anchorRegex.matches(string, range: paragraphRange) { result in
+            guard let range = result?.range else { return }
+            attributedString.fixAttributes(in: range)
+            NotesTextProcessor.openingSquareRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range else { return }
+                markSyntax(innerRange)
+            }
+            NotesTextProcessor.closingSquareRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range else { return }
+                markSyntax(innerRange)
+            }
+            NotesTextProcessor.parenRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range else { return }
+                attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.syntaxColor, range: innerRange)
+                markDelimiters(of: innerRange, length: 1)
+                let initialSyntaxRange = NSRange(location: innerRange.location, length: 1)
+                let finalSyntaxRange = NSRange(location: innerRange.location + innerRange.length - 1, length: 1)
+                hideSyntaxIfNecessary(range: initialSyntaxRange)
+                hideSyntaxIfNecessary(range: finalSyntaxRange)
+            }
+        }
+
+        NotesTextProcessor.anchorInlineRegex.matches(string, range: paragraphRange) { result in
+            guard let range = result?.range else { return }
+            attributedString.fixAttributes(in: range)
+
+            var destinationLink: String?
+
+            NotesTextProcessor.coupleRoundRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range else { return }
+                attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.syntaxColor, range: innerRange)
+                markDelimiters(of: innerRange, length: 1)
+
+                guard let linkRange = result?.range(at: 3), linkRange.length > 0 else { return }
+
+                var substring = attributedString.mutableString.substring(with: linkRange)
+
+                guard !substring.isEmpty else { return }
+                guard let note = EditTextView.note else { return }
+
+                if substring.starts(with: "/i/") || substring.starts(with: "/files/"), let path = note.project.url.appendingPathComponent(substring).path.removingPercentEncoding {
+                    substring = "file://" + path
+                }
+
+                destinationLink = substring
+                attributedString.addAttribute(.link, value: substring, range: linkRange)
+                hideSyntaxIfNecessary(range: innerRange)
+            }
+
+            NotesTextProcessor.openingSquareRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range else { return }
+                markSyntax(innerRange)
+                hideSyntaxIfNecessary(range: innerRange)
+            }
+
+            NotesTextProcessor.closingSquareRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range else { return }
+                markSyntax(innerRange)
+                hideSyntaxIfNecessary(range: innerRange)
+            }
+
+            guard destinationLink != nil else { return }
+
+            NotesTextProcessor.coupleSquareRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range else { return }
+                var _range = innerRange
+                _range.location += 1
+                _range.length -= 2
+
+                let substring = attributedString.mutableString.substring(with: _range)
+                guard substring.lengthOfBytes(using: .utf8) > 0 else { return }
+
+                attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.linkColor, range: _range)
+            }
+        }
+
+        NotesTextProcessor.imageRegex.matches(string, range: paragraphRange) { result in
+            guard let range = result?.range else { return }
+            attributedString.fixAttributes(in: range)
+
+            if NotesTextProcessor.hideSyntax {
+                attributedString.addAttribute(.font, value: hiddenFont, range: range)
+            }
+            NotesTextProcessor.imageOpeningSquareRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range else { return }
+                attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.linkColor, range: innerRange)
+            }
+            NotesTextProcessor.imageClosingSquareRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range else { return }
+                attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.syntaxColor, range: innerRange)
+            }
+        }
+
+        NotesTextProcessor.appUrlRegex.matches(string, range: paragraphRange) { result in
+            guard let innerRange = result?.range else { return }
+            var _range = innerRange
+            _range.location += 2
+            _range.length -= 4
+
+            let appLink = attributedString.mutableString.substring(with: _range)
+
+            attributedString.addAttribute(.link, value: "miaoyan://goto/" + appLink, range: _range)
+            attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.linkColor, range: _range)
+            if let range = result?.range(at: 0) {
+                attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.syntaxColor, range: range)
+            }
+
+            if let range = result?.range(at: 2) {
+                attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.syntaxColor, range: range)
+            }
+        }
+
+        NotesTextProcessor.blockQuoteRegex.matches(string, range: paragraphRange) { result in
+            guard let range = result?.range else { return }
+            attributedString.addAttribute(.font, value: quoteFont, range: range)
+            attributedString.fixAttributes(in: range)
+            attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.listColor, range: range)
+            NotesTextProcessor.blockQuoteOpeningRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range else { return }
+                markSyntax(innerRange)
+                hideSyntaxIfNecessary(range: innerRange)
+            }
+        }
+
+        NotesTextProcessor.imageInlineRegex.matches(string, range: paragraphRange) { result in
+            guard let range = result?.range else { return }
+
+            if let linkRange = result?.range(at: 3) {
+                let link = attributedString.mutableString.substring(with: linkRange).removingPercentEncoding
+
+                if let link = link, let url = note.getImageUrl(imageName: link) {
+                    attributedString.addAttribute(.link, value: url, range: linkRange)
+                    attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.linkColor, range: linkRange)
+                }
+            }
+
+            NotesTextProcessor.imageOpeningSquareRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range else { return }
+                markSyntax(innerRange)
+            }
+            NotesTextProcessor.imageClosingSquareRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range else { return }
+                markSyntax(innerRange)
+            }
+            NotesTextProcessor.parenRegex.matches(string, range: range) { innerResult in
+                guard let innerRange = innerResult?.range else { return }
+                attributedString.addAttribute(.foregroundColor, value: NotesTextProcessor.syntaxColor, range: innerRange)
+                markDelimiters(of: innerRange, length: 1)
+            }
+        }
+
+        CodeBlockHighlighter.highlightInlineHTML(attributedString: attributedString, range: paragraphRange)
+
+        NotesTextProcessor.autolinkBracketRegex.matches(string, range: paragraphRange) { result in
+            guard let range = result?.range else { return }
+            markDelimiters(of: range, length: 1)
+        }
+
+        // Fenced blocks are found once per pass, on the first emoji, rather
+        // than by rescanning the whole document for every match.
+        var fencedRanges: [NSRange]?
+        NotesTextProcessor.emojiRegex.matches(string, range: paragraphRange) { result in
+            guard let range = result?.range,
+                NotesTextProcessor.getSpanCodeBlockRange(content: attributedString, range: range) == nil
+            else { return }
+
+            let codeRanges = fencedRanges ?? NotesTextProcessor.fencedCodeBlockRanges(in: attributedString)
+            fencedRanges = codeRanges
+            guard !codeRanges.contains(where: { $0.intersection(range) != nil }) else { return }
+
+            attributedString.addAttribute(.font, value: NSFont.systemFont(ofSize: CGFloat(UserDefaultsManagement.fontSize - 2)), range: range)
+            attributedString.fixAttributes(in: range)
+        }
+
+        if UserDefaultsManagement.fontName == "SF Mono" {
+            NotesTextProcessor.blankRegex.matches(string, range: paragraphRange) { result in
+                guard let range = result?.range else { return }
+                attributedString.addAttribute(.font, value: NotesTextProcessor.publicFont!, range: range)
+            }
+        }
+
+        if UserDefaultsManagement.fontName == "Times New Roman", NotesTextProcessor.georgiaFont != nil {
+            NotesTextProcessor.englishAndSymbolRegex.matches(string, range: paragraphRange) { result in
+                guard let range = result?.range else { return }
+                attributedString.addAttribute(.font, value: NotesTextProcessor.georgiaFont!, range: range)
+            }
+        }
+
+        if NotesTextProcessor.monacoFont != nil {
+            NotesTextProcessor.allTodoInlineRegex.matches(string, range: paragraphRange) { result in
+                guard let range = result?.range else { return }
+                let middleRange = NSRange(location: range.location + 3, length: 1)
+
+                attributedString.addAttribute(.font, value: NotesTextProcessor.monacoFont!, range: middleRange)
+            }
+        }
+
+        if isFullScan {
+            NotesTextProcessor.checkBackTick(styleApplier: attributedString)
+        }
+    }
+}
